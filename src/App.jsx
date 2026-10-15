@@ -25,7 +25,39 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function TankOverview({ level, startAt, capacity, onCapacityChange }) {
+const UNITS = ['L', 'ml'];
+
+// Keeps the capacity field clean. Litres allow up to 3 decimals (1 ml = 0.001 L);
+// millilitres are whole numbers only.
+function sanitizeCapacity(raw, unit) {
+  if (unit === 'ml') return raw.replace(/[^0-9]/g, '').slice(0, 12);
+  const cleaned = raw.replace(/[^0-9.]/g, '');
+  const [whole = '', ...rest] = cleaned.split('.');
+  const decimals = rest.join('').slice(0, 3);
+  const head = whole.slice(0, 9);
+  return rest.length > 0 ? `${head}.${decimals}` : head;
+}
+
+function toLitres(value, unit) {
+  const number = parseFloat(value) || 0;
+  return unit === 'ml' ? number / 1000 : number;
+}
+
+function convertCapacity(value, from, to) {
+  if (from === to) return value;
+  const number = parseFloat(value);
+  if (!Number.isFinite(number)) return value;
+  return to === 'ml'
+    ? String(Math.round(number * 1000))
+    : String(Number((number / 1000).toFixed(3)));
+}
+
+function TankOverview({ level, startAt, capacityLitres, capacityInput, unit, onCapacityChange, onUnitChange }) {
+  const capacityInUnit = unit === 'ml' ? capacityLitres * 1000 : capacityLitres;
+  const volumeInUnit = (level / 100) * capacityInUnit;
+  const fractionDigits = unit === 'ml' ? 0 : 2;
+  const formatAmount = (amount) => amount.toLocaleString(undefined, { maximumFractionDigits: fractionDigits });
+
   return (
     <section className="card tank-card">
       <div className="section-heading tank-card-heading">
@@ -44,24 +76,37 @@ function TankOverview({ level, startAt, capacity, onCapacityChange }) {
           <div className="level-big-number">
             {Math.round(level)}<span>%</span>
           </div>
-          <p className="litre-reading">{Math.round((level / 100) * capacity).toLocaleString()} <span>/ {capacity.toLocaleString()} L</span></p>
+          <p className="litre-reading">{formatAmount(volumeInUnit)} <span>/ {formatAmount(capacityInUnit)} {unit}</span></p>
           <div className="level-progress-track" aria-label={`${Math.round(level)} percent full`}>
             <div className="level-progress-fill" style={{ width: `${level}%` }} />
           </div>
           <div className="capacity-editor">
-            <label htmlFor="tank-capacity">Tank capacity</label>
+            <div className="capacity-editor-head">
+              <label htmlFor="tank-capacity">Tank capacity</label>
+              <div className="unit-switch" role="group" aria-label="Capacity unit">
+                {UNITS.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={option === unit ? 'unit-option selected' : 'unit-option'}
+                    aria-pressed={option === unit}
+                    onClick={() => onUnitChange(option)}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="capacity-input-wrap">
               <input
                 id="tank-capacity"
-                type="number"
-                min="1"
-                max="100000000"
-                step="100"
-                value={capacity}
+                type="text"
+                inputMode={unit === 'ml' ? 'numeric' : 'decimal'}
+                value={capacityInput}
                 onChange={(event) => onCapacityChange(event.target.value)}
-                aria-label="Tank capacity in litres"
+                aria-label={`Tank capacity in ${unit === 'ml' ? 'millilitres' : 'litres'}`}
               />
-              <span>L</span>
+              <span>{unit}</span>
             </div>
           </div>
           <p className="tank-helper">Water level updates automatically in this preview.</p>
@@ -202,6 +247,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [apiError, setApiError] = useState('');
   const [capacity, setCapacity] = useState('10000');
+  const [capacityUnit, setCapacityUnit] = useState('L');
   const [notifications, setNotifications] = useState([]);
   const [exitingNotificationIds, setExitingNotificationIds] = useState([]);
   const previousLevelRef = useRef(null);
@@ -293,6 +339,13 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [motorOn, mode, startAt, stopAt]);
 
+  // Switching units converts the typed amount too (2 L <-> 2000 ml).
+  const handleUnitChange = useCallback((nextUnit) => {
+    if (nextUnit === capacityUnit) return;
+    setCapacity((current) => convertCapacity(current, capacityUnit, nextUnit));
+    setCapacityUnit(nextUnit);
+  }, [capacityUnit]);
+
   const handleMotorToggle = useCallback(async () => {
     const desired = !motorOn;
     setBusy(true);
@@ -349,16 +402,16 @@ export default function App() {
     <main className="app-shell water-dashboard">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap');
-        :root { color-scheme: dark; background: #030610; }
-        html, body, #root { min-height: 100%; margin: 0; background: #030610 !important; }
+        :root { color-scheme: dark; background: #0d141f; }
+        html, body, #root { min-height: 100%; margin: 0; background: #0d141f !important; }
         .water-dashboard, .water-dashboard * { font-family: Montserrat, sans-serif !important; }
-        .water-dashboard { width: 100%; max-width: none; margin: 0; background: #030610 !important; color: #edf3fc; min-height: 100vh; padding: 22px 24px 22px; box-sizing: border-box; }
-        .water-dashboard .card { background: #0e1521 !important; border-color: #263346 !important; }
+        .water-dashboard { width: 100%; max-width: none; margin: 0; background: radial-gradient(1100px 520px at 15% -8%, #172438 0%, #0d141f 62%) #0d141f !important; color: #edf3fc; min-height: 100vh; padding: 22px 24px 22px; box-sizing: border-box; }
+        .water-dashboard .card { background: #162132 !important; border-color: #27364d !important; box-shadow: 0 10px 28px #05090f55, inset 0 1px 0 #ffffff0d !important; }
         .water-dashboard .section-icon, .water-dashboard .pump-illustration { opacity: 1 !important; }
         .water-dashboard svg { opacity: 1 !important; stroke-opacity: 1 !important; }
         .water-dashboard .text-muted, .water-dashboard .mode-note, .water-dashboard .tank-helper,
         .water-dashboard .threshold-control p, .water-dashboard .range-end-labels { color: #a7b6ca !important; }
-        .water-dashboard .servo-header { display: flex; align-items: center; min-height: 46px; margin: 0 0 20px; padding: 0 0 14px; border-bottom: 1px solid #1d2b43; }
+        .water-dashboard .servo-header { display: flex; align-items: center; min-height: 46px; margin: 0 0 20px; padding: 0 0 14px; border-bottom: 1px solid #27364d; }
         .water-dashboard .servo-header h1 { margin: 0; color: #f1f6ff; font-size: 25px; line-height: 1.25; letter-spacing: -0.045em; font-weight: 800; }
         .water-dashboard .servo-header h1 span { color: #38bdf8; }
         .water-dashboard .servo-header-mark { width: 4px; height: 26px; margin-right: 12px; border-radius: 8px; background: linear-gradient(180deg, #67e8f9, #3b82f6); box-shadow: 0 0 18px #38bdf844; }
@@ -371,11 +424,11 @@ export default function App() {
         .water-dashboard .capacity-editor { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
         .water-dashboard .capacity-editor label { color: #c6d3e5; font-size: 12px; font-weight: 700; }
         .water-dashboard .capacity-input-wrap { display: flex; align-items: center; max-width: 220px; gap: 10px; }
-        .water-dashboard .capacity-input-wrap input { width: 100%; min-width: 0; background: #080e18; color: #f3f7ff; border: 1px solid #3b4b62; border-radius: 9px; padding: 10px 12px; font: inherit; outline: none; }
+        .water-dashboard .capacity-input-wrap input { width: 100%; min-width: 0; background: #0f1826; color: #f3f7ff; border: 1px solid #3a4a63; border-radius: 9px; padding: 10px 12px; font: inherit; outline: none; }
         .water-dashboard .capacity-input-wrap input:focus { border-color: #38bdf8; box-shadow: 0 0 0 2px #38bdf833; }
         .water-dashboard .capacity-input-wrap span { color: #cbd8e8; font-weight: 700; }
         .water-dashboard .notification-stack { display: grid; gap: 8px; margin-bottom: 14px; }
-        .water-dashboard .notification-item { display: flex; align-items: flex-start; gap: 10px; background: #111c2b; border: 1px solid #34465e; border-left: 3px solid #38bdf8; padding: 12px 14px; border-radius: 10px; overflow: hidden; max-height: 140px; opacity: 1; transform: translateY(0); transition: opacity 240ms ease, transform 240ms ease, max-height 280ms ease, padding 280ms ease, border-width 280ms ease, margin 280ms ease; }
+        .water-dashboard .notification-item { display: flex; align-items: flex-start; gap: 10px; background: #1c2a3f; border: 1px solid #34465e; border-left: 3px solid #38bdf8; padding: 12px 14px; border-radius: 10px; overflow: hidden; max-height: 140px; opacity: 1; transform: translateY(0); transition: opacity 240ms ease, transform 240ms ease, max-height 280ms ease, padding 280ms ease, border-width 280ms ease, margin 280ms ease; }
         .water-dashboard .notification-item.is-exiting { opacity: 0; transform: translateY(-8px) scale(.985); max-height: 0; padding-top: 0; padding-bottom: 0; border-top-width: 0; border-bottom-width: 0; border-left-width: 0; margin-top: -8px; pointer-events: none; }
         .water-dashboard .notification-item.low { border-left-color: #f59e0b; }
         .water-dashboard .notification-item.high { border-left-color: #34d399; }
@@ -387,6 +440,25 @@ export default function App() {
         .water-dashboard .notification-heading { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 13px; font-weight: 700; color: #cbd8e8; }
         .water-dashboard .compact-error { margin-bottom: 12px; }
         .water-dashboard .mode-option, .water-dashboard .pump-switch { opacity: 1 !important; }
+
+        .water-dashboard .capacity-editor-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+        .water-dashboard .unit-switch { display: inline-flex; padding: 3px; gap: 2px; background: #0f1826; border: 1px solid #34465e; border-radius: 9px; }
+        .water-dashboard .unit-option { min-width: 38px; padding: 5px 11px; border: 0; border-radius: 7px; background: transparent; color: #a7b6ca; font-size: 12px; font-weight: 700; cursor: pointer; transition: background 140ms ease, color 140ms ease; }
+        .water-dashboard .unit-option:hover { color: #f1f6ff; }
+        .water-dashboard .unit-option.selected { background: #38bdf8; color: #06223a; }
+        .water-dashboard .unit-option:focus-visible { outline: 2px solid #f1f6ff; outline-offset: 2px; }
+        .water-dashboard .pump-illustration-on { background: #16a34a !important; border: 2px solid #4ade80 !important; color: #ffffff !important; box-shadow: 0 6px 16px #16a34a66 !important; }
+        .water-dashboard .pump-illustration-off { background: #dc2626 !important; border: 2px solid #f87171 !important; color: #ffffff !important; box-shadow: 0 6px 16px #dc262666 !important; }
+        .water-dashboard .pump-illustration svg { color: #ffffff !important; stroke: #ffffff !important; stroke-width: 2.2 !important; }
+        .water-dashboard .motor-status-dot { width: 14px !important; height: 14px !important; border-radius: 50% !important; opacity: 1 !important; animation: none !important; border: 2px solid #ffffff !important; }
+        .water-dashboard .motor-status-dot.status-running { background: #22c55e !important; box-shadow: 0 0 0 3px #22c55e55 !important; }
+        .water-dashboard .motor-status-dot.status-stopped { background: #ef4444 !important; box-shadow: 0 0 0 3px #ef444455 !important; }
+        .water-dashboard .pump-switch-on .pump-switch-track { background: #16a34a !important; border-color: #4ade80 !important; }
+        .water-dashboard .pump-switch-off .pump-switch-track { background: #dc2626 !important; border-color: #f87171 !important; }
+        .water-dashboard .pump-switch-thumb { background: #ffffff !important; }
+        .water-dashboard .text-positive { color: #4ade80 !important; font-weight: 700; }
+        .water-dashboard .low-water-badge { background: #dc2626 !important; border: 1px solid #f87171 !important; color: #ffffff !important; font-weight: 700; opacity: 1 !important; }
+        .water-dashboard .low-water-badge svg { color: #ffffff !important; stroke: #ffffff !important; }
         @media (max-width: 640px) { .water-dashboard .capacity-input-wrap { max-width: 100%; } }
       `}</style>
 
@@ -418,8 +490,11 @@ export default function App() {
         <TankOverview
           level={level}
           startAt={startAt}
-          capacity={Math.max(1, Number(capacity) || 1)}
-          onCapacityChange={(value) => setCapacity(value.replace(/[^0-9]/g, '').slice(0, 9))}
+          capacityLitres={Math.max(0.001, toLitres(capacity, capacityUnit))}
+          capacityInput={capacity}
+          unit={capacityUnit}
+          onCapacityChange={(value) => setCapacity(sanitizeCapacity(value, capacityUnit))}
+          onUnitChange={handleUnitChange}
         />
         <MotorCard motorOn={motorOn} mode={mode} onToggleMotor={handleMotorToggle} onSetMode={handleModeChange} busy={busy} />
         <ThresholdCard startAt={startAt} stopAt={stopAt} onStartChange={handleStartChange} onStopChange={handleStopChange} />
