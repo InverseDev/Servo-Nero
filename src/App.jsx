@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Activity,
   AlertTriangle,
   Check,
-  ChevronDown,
-  Droplets,
   Fan,
   Settings2,
   Waves,
   Zap,
+  Bell,
+  X,
+  Github,
 } from 'lucide-react';
 import WaterTank from './components/WaterTank.jsx';
 import LevelChart from './components/LevelChart.jsx';
@@ -25,7 +25,7 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function TankOverview({ level, startAt }) {
+function TankOverview({ level, startAt, capacity, onCapacityChange }) {
   return (
     <section className="card tank-card">
       <div className="section-heading tank-card-heading">
@@ -44,13 +44,25 @@ function TankOverview({ level, startAt }) {
           <div className="level-big-number">
             {Math.round(level)}<span>%</span>
           </div>
-          <p className="litre-reading">{Math.round(level * 100)} <span>/ 10,000 L</span></p>
+          <p className="litre-reading">{Math.round((level / 100) * capacity).toLocaleString()} <span>/ {capacity.toLocaleString()} L</span></p>
           <div className="level-progress-track" aria-label={`${Math.round(level)} percent full`}>
             <div className="level-progress-fill" style={{ width: `${level}%` }} />
           </div>
-          <div className="level-meta">
-            <span><span className="legend-dot" /> Tank capacity</span>
-            <strong>10,000 L</strong>
+          <div className="capacity-editor">
+            <label htmlFor="tank-capacity">Tank capacity</label>
+            <div className="capacity-input-wrap">
+              <input
+                id="tank-capacity"
+                type="number"
+                min="1"
+                max="100000000"
+                step="100"
+                value={capacity}
+                onChange={(event) => onCapacityChange(event.target.value)}
+                aria-label="Tank capacity in litres"
+              />
+              <span>L</span>
+            </div>
           </div>
           <p className="tank-helper">Water level updates automatically in this preview.</p>
         </div>
@@ -189,6 +201,27 @@ export default function App() {
   const [history, setHistory] = useState([86, 84, 82, 80, 77, 73, 69, 65, 62, 58, 54, 50, 46, 43, 39, 35, 31, 28, 24, 21, 40, 62, 82, 78, 68]);
   const [busy, setBusy] = useState(false);
   const [apiError, setApiError] = useState('');
+  const [capacity, setCapacity] = useState('10000');
+  const [notifications, setNotifications] = useState([]);
+  const [exitingNotificationIds, setExitingNotificationIds] = useState([]);
+  const previousLevelRef = useRef(null);
+  const notificationIdRef = useRef(0);
+
+  const addNotification = useCallback((title, message, kind = 'info') => {
+    const item = { id: ++notificationIdRef.current, title, message, kind, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+    setNotifications((items) => [item, ...items].slice(0, 3));
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(title, { body: message });
+    }
+  }, []);
+
+  const dismissNotification = useCallback((id) => {
+    setExitingNotificationIds((ids) => ids.includes(id) ? ids : [...ids, id]);
+    window.setTimeout(() => {
+      setNotifications((items) => items.filter((item) => item.id !== id));
+      setExitingNotificationIds((ids) => ids.filter((itemId) => itemId !== id));
+    }, 280);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -208,6 +241,19 @@ export default function App() {
       });
     return () => { mounted = false; };
   }, []);
+
+  useEffect(() => {
+    const previous = previousLevelRef.current;
+    if (previous !== null) {
+      if (previous > startAt && level <= startAt) {
+        addNotification('Low water threshold reached', `Tank level is at ${Math.round(level)}%. The pump should start in automatic mode.`, 'low');
+      }
+      if (previous < stopAt && level >= stopAt) {
+        addNotification('Upper threshold reached', `Tank level is at ${Math.round(level)}%. The pump should stop in automatic mode.`, 'high');
+      }
+    }
+    previousLevelRef.current = level;
+  }, [level, startAt, stopAt, addNotification]);
 
   // Preview-only simulation: level rises while the pump is on and falls slowly
   // as water is used. Replace this timer with data from the real backend later.
@@ -300,40 +346,91 @@ export default function App() {
   }, [startAt]);
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div className="brand-lockup">
-          <div className="brand-mark"><Droplets size={23} strokeWidth={2.2} /></div>
-          <div>
-            <h1>AquaSense</h1>
-            <p>SMART WATER CONTROL</p>
-          </div>
-        </div>
-        <div className="topbar-tank-select">
-          <span className="topbar-tank-dot" />
-          <span>Main tank</span>
-          <ChevronDown size={15} />
-        </div>
+    <main className="app-shell water-dashboard">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap');
+        :root { color-scheme: dark; background: #030610; }
+        html, body, #root { min-height: 100%; margin: 0; background: #030610 !important; }
+        .water-dashboard, .water-dashboard * { font-family: Montserrat, sans-serif !important; }
+        .water-dashboard { width: 100%; max-width: none; margin: 0; background: #030610 !important; color: #edf3fc; min-height: 100vh; padding: 22px 24px 22px; box-sizing: border-box; }
+        .water-dashboard .card { background: #0e1521 !important; border-color: #263346 !important; }
+        .water-dashboard .section-icon, .water-dashboard .pump-illustration { opacity: 1 !important; }
+        .water-dashboard svg { opacity: 1 !important; stroke-opacity: 1 !important; }
+        .water-dashboard .text-muted, .water-dashboard .mode-note, .water-dashboard .tank-helper,
+        .water-dashboard .threshold-control p, .water-dashboard .range-end-labels { color: #a7b6ca !important; }
+        .water-dashboard .servo-header { display: flex; align-items: center; min-height: 46px; margin: 0 0 20px; padding: 0 0 14px; border-bottom: 1px solid #1d2b43; }
+        .water-dashboard .servo-header h1 { margin: 0; color: #f1f6ff; font-size: 25px; line-height: 1.25; letter-spacing: -0.045em; font-weight: 800; }
+        .water-dashboard .servo-header h1 span { color: #38bdf8; }
+        .water-dashboard .servo-header-mark { width: 4px; height: 26px; margin-right: 12px; border-radius: 8px; background: linear-gradient(180deg, #67e8f9, #3b82f6); box-shadow: 0 0 18px #38bdf844; }
+        .water-dashboard .dashboard-grid { margin-top: 0; }
+        .water-dashboard .servo-footer { display: flex; justify-content: center; margin-top: 22px; padding-top: 14px; }
+        .water-dashboard .github-link { display: inline-flex; align-items: center; gap: 8px; color: #aebed4; text-decoration: none; font-size: 12px; font-weight: 600; transition: color 160ms ease; }
+        .water-dashboard .github-link:hover { color: #f1f6ff; }
+        .water-dashboard .github-link svg { color: #d9e4f5; }
+        @media (max-width: 640px) { .water-dashboard { padding: 18px 14px 20px; } .water-dashboard .servo-header { margin-bottom: 14px; } .water-dashboard .servo-header h1 { font-size: 23px; } }
+        .water-dashboard .capacity-editor { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
+        .water-dashboard .capacity-editor label { color: #c6d3e5; font-size: 12px; font-weight: 700; }
+        .water-dashboard .capacity-input-wrap { display: flex; align-items: center; max-width: 220px; gap: 10px; }
+        .water-dashboard .capacity-input-wrap input { width: 100%; min-width: 0; background: #080e18; color: #f3f7ff; border: 1px solid #3b4b62; border-radius: 9px; padding: 10px 12px; font: inherit; outline: none; }
+        .water-dashboard .capacity-input-wrap input:focus { border-color: #38bdf8; box-shadow: 0 0 0 2px #38bdf833; }
+        .water-dashboard .capacity-input-wrap span { color: #cbd8e8; font-weight: 700; }
+        .water-dashboard .notification-stack { display: grid; gap: 8px; margin-bottom: 14px; }
+        .water-dashboard .notification-item { display: flex; align-items: flex-start; gap: 10px; background: #111c2b; border: 1px solid #34465e; border-left: 3px solid #38bdf8; padding: 12px 14px; border-radius: 10px; overflow: hidden; max-height: 140px; opacity: 1; transform: translateY(0); transition: opacity 240ms ease, transform 240ms ease, max-height 280ms ease, padding 280ms ease, border-width 280ms ease, margin 280ms ease; }
+        .water-dashboard .notification-item.is-exiting { opacity: 0; transform: translateY(-8px) scale(.985); max-height: 0; padding-top: 0; padding-bottom: 0; border-top-width: 0; border-bottom-width: 0; border-left-width: 0; margin-top: -8px; pointer-events: none; }
+        .water-dashboard .notification-item.low { border-left-color: #f59e0b; }
+        .water-dashboard .notification-item.high { border-left-color: #34d399; }
+        .water-dashboard .notification-copy { flex: 1; min-width: 0; }
+        .water-dashboard .notification-copy strong { display: block; font-size: 13px; color: #f4f7fb; }
+        .water-dashboard .notification-copy p { margin: 3px 0 0; color: #b6c4d8; font-size: 12px; line-height: 1.5; }
+        .water-dashboard .notification-copy time { display: block; margin-top: 5px; font-size: 10px; color: #8fa2bb; }
+        .water-dashboard .notification-dismiss { background: transparent; color: #cbd5e1; border: 0; padding: 2px; cursor: pointer; }
+        .water-dashboard .notification-heading { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 13px; font-weight: 700; color: #cbd8e8; }
+        .water-dashboard .compact-error { margin-bottom: 12px; }
+        .water-dashboard .mode-option, .water-dashboard .pump-switch { opacity: 1 !important; }
+        @media (max-width: 640px) { .water-dashboard .capacity-input-wrap { max-width: 100%; } }
+      `}</style>
+
+      <header className="servo-header">
+        <span className="servo-header-mark" aria-hidden="true" />
+        <h1>Servo-<span>Nero</span></h1>
       </header>
 
-      <div className="page-intro">
-        <div>
-          <p className="eyebrow">WATER MANAGEMENT</p>
-          <h2>Your tank at a glance</h2>
-          <p className="intro-subtitle">Monitor the level. Control the pump.</p>
-        </div>
-        <div className="current-reading"><span className="reading-pulse" /> PREVIEW</div>
-      </div>
+      {apiError && <div className="error-banner compact-error" role="status"><AlertTriangle size={15} /> {apiError}</div>}
 
-      {apiError && <div className="error-banner" role="status"><AlertTriangle size={15} /> {apiError}</div>}
+      {notifications.length > 0 && (
+        <section className="notification-stack" aria-live="polite" aria-label="Tank notifications">
+          <div className="notification-heading"><Bell size={15} /> Notifications</div>
+          {notifications.map((item) => (
+            <div className={`notification-item ${item.kind} ${exitingNotificationIds.includes(item.id) ? 'is-exiting' : ''}`} key={item.id}>
+              <AlertTriangle size={17} />
+              <div className="notification-copy">
+                <strong>{item.title}</strong>
+                <p>{item.message}</p>
+                <time>{item.time}</time>
+              </div>
+              <button className="notification-dismiss" type="button" aria-label="Dismiss notification" onClick={() => dismissNotification(item.id)}><X size={15} /></button>
+            </div>
+          ))}
+        </section>
+      )}
 
       <div className="dashboard-grid">
-        <TankOverview level={level} startAt={startAt} />
+        <TankOverview
+          level={level}
+          startAt={startAt}
+          capacity={Math.max(1, Number(capacity) || 1)}
+          onCapacityChange={(value) => setCapacity(value.replace(/[^0-9]/g, '').slice(0, 9))}
+        />
         <MotorCard motorOn={motorOn} mode={mode} onToggleMotor={handleMotorToggle} onSetMode={handleModeChange} busy={busy} />
         <ThresholdCard startAt={startAt} stopAt={stopAt} onStartChange={handleStartChange} onStopChange={handleStopChange} />
         <LevelChart history={history} currentLevel={level} />
       </div>
-      <footer className="page-footer"><span className="footer-watermark"><Activity size={13} /> AQUASENSE</span><span>Prototype interface · values are simulated</span></footer>
+      <footer className="servo-footer">
+        <a className="github-link" href="https://github.com/InverseDev/Servo-Nero" target="_blank" rel="noreferrer">
+          <Github size={16} strokeWidth={2.2} />
+          <span>View on GitHub</span>
+        </a>
+      </footer>
     </main>
   );
 }
